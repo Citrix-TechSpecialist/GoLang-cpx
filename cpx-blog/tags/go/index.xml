@@ -1,0 +1,1799 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>NetScaler NITRO Blogs</title>
+    <link>http://bt.logic.bz/tags/go/index.xml</link>
+    <description>Recent content on NetScaler NITRO Blogs</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-EN</language>
+    <copyright>&amp;copy; 2016. All rights reserved.</copyright>
+    <atom:link href="http://bt.logic.bz/tags/go/index.xml" rel="self" type="application/rss+xml" />
+    
+    <item>
+      <title>How to Set Up Multiple Domains on NetScaler CPX (Content Switching)</title>
+      <link>http://bt.logic.bz/post/content-switching-on-cpx/</link>
+      <pubDate>Fri, 30 Sep 2016 12:35:01 -0500</pubDate>
+      
+      <guid>http://bt.logic.bz/post/content-switching-on-cpx/</guid>
+      <description>
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;When using NetScaler CPX, &lt;strong&gt;content switching&lt;/strong&gt; can be used to host more than one domain off of a single server or IP address. In this guide I will show how to configure content switching on NetScaler CPX via it&amp;rsquo;s REST API called NITRO using Go.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own &lt;a href=&#34;https://www.getpostman.com/&#34;&gt;postman client&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&#34;prerequisites&#34;&gt;Prerequisites&lt;/h2&gt;
+
+&lt;p&gt;This guide assumes that you have a NetScaler CPX deployed within a docker environment. We also assume that you have more than one web server to place behind the content switch.&lt;/p&gt;
+
+&lt;p&gt;The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://www.microloadbalancer.com&#34;&gt;https://www.microloadbalancer.com&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&#34;&gt;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&#34;&gt;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://layer7.wordpress.com/&#34;&gt;https://layer7.wordpress.com/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;When these requirements are fulfilled you can continue with this guide.&lt;/p&gt;
+
+&lt;h2 id=&#34;example-configuration&#34;&gt;Example Configuration&lt;/h2&gt;
+
+&lt;p&gt;For demonstration purposes we are going to set up three domains with our NetScaler CPX.  The domain names we will use in this guide are &lt;strong&gt;rserver.com&lt;/strong&gt;, &lt;strong&gt;gserver.com&lt;/strong&gt;, and &lt;strong&gt;bserver.com&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;step-1&#34;&gt;Step One: Imports, Variables, and Helper Functions&lt;/h3&gt;
+
+&lt;p&gt;The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing &lt;code&gt;net/http&lt;/code&gt; for each request with a few other imports to handle formatting and parsing.  The &lt;code&gt;net/http/cookiejar&lt;/code&gt; is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;package main
+
+import (
+	&amp;quot;net/http&amp;quot;
+	&amp;quot;io/ioutil&amp;quot;
+	&amp;quot;bytes&amp;quot;
+	&amp;quot;net/http/cookiejar&amp;quot;
+	&amp;quot;fmt&amp;quot;
+	&amp;quot;encoding/json&amp;quot;
+)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;The debug boolean allows Go to output simple debugging to stdout throughout the script.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;const cpxip string = &amp;quot;192.168.6.5&amp;quot;
+const cpxport string = &amp;quot;80&amp;quot;
+const cpxusername string = &amp;quot;nsroot&amp;quot;
+const cpxpassword string = &amp;quot;nsroot&amp;quot;
+const debug bool = true
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Next, we will define a helper function &lt;code&gt;postReq&lt;/code&gt; that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;POST&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-2&#34;&gt;Step Two: Login&lt;/h3&gt;
+
+&lt;p&gt;Now that we have our initialization steps complete from &lt;a href=&#34;#step-1&#34;&gt;Step One&lt;/a&gt;, we are able to login.  Here we define the login function which points to &lt;code&gt;/nitro/v1/config/login&lt;/code&gt;.  We also define our post data, including the &lt;code&gt;username&lt;/code&gt;, &lt;code&gt;password&lt;/code&gt;, and &lt;code&gt;timeout&lt;/code&gt; fields.  We send this post to the &lt;code&gt;postReq&lt;/code&gt; helper function.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;It is important to note that as long as the username and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func login(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/login&amp;quot;
+	
+	type Login struct {
+		Username string `json:&amp;quot;username&amp;quot;`
+		Password string `json:&amp;quot;password&amp;quot;`
+		Timeout int `json:&amp;quot;timeout&amp;quot;`
+	}
+	type PostData struct {
+		Login Login `json:&amp;quot;login&amp;quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-3&#34;&gt;Step Three: Enabling Features&lt;/h3&gt;
+
+&lt;p&gt;Now that we are authenticated from &lt;a href=&#34;#step-2&#34;&gt;Step Two&lt;/a&gt; we can begin the configuration.  We first need to enable the NetScaler Features that we will utilize in this demo.&lt;/p&gt;
+
+&lt;p&gt;We will need both:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Load Balancing (LB)&lt;/li&gt;
+&lt;li&gt;Content Switching (CS)&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;To do so we will create a request to &lt;code&gt;/nitro/v1/config/nsfeature?action=enable&lt;/code&gt;.  This request will have our nsfeatures (LB and CS) set in an array.  We will then pass the info to &lt;code&gt;postReq&lt;/code&gt; to handle our request.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func enableFeature(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsfeature?action=enable&amp;quot;
+
+	type NsFeature struct {
+		Feature []string `json:&amp;quot;feature&amp;quot;`
+	}
+	type PostData struct {
+		NsFeature NsFeature `json:&amp;quot;nsfeature&amp;quot;`
+	}
+
+	data := PostData{
+		NsFeature{
+			Feature: []string{&amp;quot;LB&amp;quot;, &amp;quot;CS&amp;quot;},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-4&#34;&gt;Step Four: Add Servers&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX aware of the back-end servers.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/server&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we will make CPX aware of three servers:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;rserver.com
+
+&lt;ul&gt;
+&lt;li&gt;10.21.0.95&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;li&gt;gserver.com
+
+&lt;ul&gt;
+&lt;li&gt;10.21.0.150&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;li&gt;bserver.com
+
+&lt;ul&gt;
+&lt;li&gt;10.21.0.31&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/server&amp;quot;
+
+	type Server struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Ipaddress string `json:&amp;quot;ipaddress&amp;quot;`
+		Comment string `json:&amp;quot;comment&amp;quot;`
+	}
+	type PostData struct {
+		Server []Server `json:&amp;quot;server&amp;quot;`
+	}
+
+	data := PostData{
+		[]Server{
+			Server{
+				Name: &amp;quot;rserver.com&amp;quot;,
+				Ipaddress: &amp;quot;10.21.0.95&amp;quot;,
+				Comment: &amp;quot;R Web Server&amp;quot;,
+				},
+			Server{
+				Name: &amp;quot;gserver.com&amp;quot;,
+				Ipaddress: &amp;quot;10.21.0.150&amp;quot;,
+				Comment: &amp;quot;G Web Server&amp;quot;,
+				},
+			Server{
+				Name: &amp;quot;bserver.com&amp;quot;,
+				Ipaddress: &amp;quot;10.21.0.31&amp;quot;,
+				Comment: &amp;quot;B Web Server&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-5&#34;&gt;Step Five: Add Services&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX aware of the back-end servers services.  A service is an application or port open on the server.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/service&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we will make CPX aware of three services:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;rserver.com
+
+&lt;ul&gt;
+&lt;li&gt;http/80&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;li&gt;gserver.com
+
+&lt;ul&gt;
+&lt;li&gt;http/80&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;li&gt;bserver.com
+
+&lt;ul&gt;
+&lt;li&gt;http/80&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServices(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/service&amp;quot;
+
+	type Service struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servername string `json:&amp;quot;servername&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Service []Service `json:&amp;quot;service&amp;quot;`
+	}
+
+	data := PostData{
+		[]Service{
+			Service{
+				Name: &amp;quot;http-rserver.com&amp;quot;,
+				Servername: &amp;quot;rserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Port: 80,
+				},
+			Service{
+				Name: &amp;quot;http-gserver.com&amp;quot;,
+				Servername: &amp;quot;gserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Port: 80,
+				},
+			Service{
+				Name: &amp;quot;http-bserver.com&amp;quot;,
+				Servername: &amp;quot;bserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Port: 80,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-6&#34;&gt;Step Six: Add Load Balancing Virtual Servers&lt;/h3&gt;
+
+&lt;p&gt;We will next create load balancing virtual servers on the NetScaler.  These virtual servers will be internal only, meaning we will not define an external IP address or VIP.  We do this because we will reference these virtual servers behind a single content switching virtual server: one virtual IP.&lt;/p&gt;
+
+&lt;p&gt;To do so we will create the post call to &lt;code&gt;/nitro/v1/config/lbvserver&lt;/code&gt; with the data of virtual server names and HTTP as the service types.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addLBVservers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver&amp;quot;
+
+	type Lbvserver struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver []Lbvserver `json:&amp;quot;lbvserver&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver{
+			Lbvserver{
+				Name: &amp;quot;lbvs-http-rserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				},
+			Lbvserver{
+				Name: &amp;quot;lbvs-http-gserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				},
+			Lbvserver{
+				Name: &amp;quot;lbvs-http-bserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-7&#34;&gt;Step Seven: Bind Services to Virtual Servers&lt;/h3&gt;
+
+&lt;p&gt;The next step is to bind the services to the load balancing virtual server we just created.  Binding the services allows the NetScaler to load balance servers behind a single entry point.&lt;/p&gt;
+
+&lt;p&gt;We will create our post request to &lt;code&gt;/nitro/v1/config/lbvserver_service_binding&lt;/code&gt;.  The post data binds load balancing virtual names and service names.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindLBVserversToServices(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver_service_binding&amp;quot;
+
+	type Lbvserver_service_binding struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicename string `json:&amp;quot;servicename&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver_service_binding []Lbvserver_service_binding `json:&amp;quot;lbvserver_service_binding&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver_service_binding{
+			Lbvserver_service_binding{
+				Name: &amp;quot;lbvs-http-rserver.com&amp;quot;,
+				Servicename: &amp;quot;http-rserver.com&amp;quot;,
+				},
+			Lbvserver_service_binding{
+				Name: &amp;quot;lbvs-http-gserver.com&amp;quot;,
+				Servicename: &amp;quot;http-gserver.com&amp;quot;,
+				},
+			Lbvserver_service_binding{
+				Name: &amp;quot;lbvs-http-bserver.com&amp;quot;,
+				Servicename: &amp;quot;http-bserver.com&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-8&#34;&gt;Step Eight: Add Content Switching Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;The next step is to create the single Content Switching Virtual Server.  This virtual server will be tied to the external IP (VIP) which is defined below in &lt;code&gt;ipv46&lt;/code&gt;.  We will utilize this content switch with policy which we will add in &lt;a href=&#34;#step-9&#34;&gt;Step Nine&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;The post will be sent to &lt;code&gt;/nitro/v1/config/csvserver&lt;/code&gt; and the post data defines a name, the VIP (ipv46), service type, and port.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addCSVserver(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/csvserver&amp;quot;
+
+	type Csvserver struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Ipv46 string `json:&amp;quot;ipv46&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Csvserver Csvserver `json:&amp;quot;csvserver&amp;quot;`
+	}
+
+	data := PostData{
+		Csvserver{
+			Name: &amp;quot;csvs_xserver.com&amp;quot;,
+			Ipv46: &amp;quot;192.168.20.13&amp;quot;,
+			Servicetype: &amp;quot;http&amp;quot;,
+			Port: 80,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-9&#34;&gt;Step Nine: Add Content Switching Policies&lt;/h3&gt;
+
+&lt;p&gt;Next we will create our content switching policies.  A content switch policy allows us to decide where to route traffic.  There are many ways to route traffic, here we will utilize a DNS name.  We will specify a name and a Domain or DNS name.&lt;/p&gt;
+
+&lt;p&gt;We create our request to &lt;code&gt;/nitro/v1/config/cspolicy&lt;/code&gt; and specify the array of cspolicies.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addCSPolicy(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/cspolicy&amp;quot;
+
+	type Cspolicy struct {
+		Policyname string `json:&amp;quot;policyname&amp;quot;`
+		Domain string `json:&amp;quot;domain&amp;quot;`
+	}
+	type PostData struct {
+		Cspolicy []Cspolicy `json:&amp;quot;cspolicy&amp;quot;`
+	}
+
+	data := PostData{
+		[]Cspolicy{
+			Cspolicy{
+				Policyname: &amp;quot;rserver.com&amp;quot;,
+				Domain: &amp;quot;rserver.com&amp;quot;,
+				},
+			Cspolicy{
+				Policyname: &amp;quot;gserver.com&amp;quot;,
+				Domain: &amp;quot;gserver.com&amp;quot;,
+				},
+			Cspolicy{
+				Policyname: &amp;quot;bserver.com&amp;quot;,
+				Domain: &amp;quot;bserver.com&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-10&#34;&gt;Step Ten: Bind Content Switching Policies to Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;Next we need to bind our Content Switching Virtual Server to our Policy as well as our Target Load Balancing Virtual Server.  This step is the glue that allows the content switch to happen.  When traffic comes into the content switch virtual server our policies will route the traffic to the target load balancing virtual server that we define in the configuration.&lt;/p&gt;
+
+&lt;p&gt;We do this by creating our request to &lt;code&gt;/nitro/v1/config/csvserver_cspolicy_binding&lt;/code&gt; and sending the post data summarized by:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Content Switch&lt;/strong&gt;: csvs_xserver.com
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Policy&lt;/strong&gt;: rserver.com &lt;strong&gt;Target&lt;/strong&gt;: lbvs-http-rserver.com&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Policy&lt;/strong&gt;: gserver.com &lt;strong&gt;Target&lt;/strong&gt;: lbvs-http-gserver.com&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Policy&lt;/strong&gt;: bserver.com &lt;strong&gt;Target&lt;/strong&gt;: lbvs-http-bserver.com&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindCSPolicyToCSVservers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/csvserver_cspolicy_binding&amp;quot;
+
+	type Csvserver_cspolicy_binding struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Policyname string `json:&amp;quot;policyname&amp;quot;`
+		Targetlbvserver string `json:&amp;quot;targetlbvserver&amp;quot;`
+	}
+	type PostData struct {
+		Csvserver_cspolicy_binding []Csvserver_cspolicy_binding `json:&amp;quot;csvserver_cspolicy_binding&amp;quot;`
+	}
+
+	data := PostData{
+		[]Csvserver_cspolicy_binding{
+			Csvserver_cspolicy_binding{
+				Name: &amp;quot;csvs_xserver.com&amp;quot;,
+				Policyname: &amp;quot;rserver.com&amp;quot;,
+				Targetlbvserver: &amp;quot;lbvs-http-rserver.com&amp;quot;,
+				},
+			Csvserver_cspolicy_binding{
+				Name: &amp;quot;csvs_xserver.com&amp;quot;,
+				Policyname: &amp;quot;gserver.com&amp;quot;,
+				Targetlbvserver: &amp;quot;lbvs-http-gserver.com&amp;quot;,
+				},
+			Csvserver_cspolicy_binding{
+				Name: &amp;quot;csvs_xserver.com&amp;quot;,
+				Policyname: &amp;quot;bserver.com&amp;quot;,
+				Targetlbvserver: &amp;quot;lbvs-http-bserver.com&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-11&#34;&gt;Step Eleven: Save Configuration&lt;/h3&gt;
+
+&lt;p&gt;Our configuration is done!  We should have a working content switching policy now, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.&lt;/p&gt;
+
+&lt;p&gt;We save the config by posting our data defined below to &lt;code&gt;/nitro/v1/config/nsconfig?action=save&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func saveConfig(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsconfig?action=save&amp;quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&amp;quot;nsconfig&amp;quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-12&#34;&gt;Step Twelve: Logout&lt;/h3&gt;
+
+&lt;p&gt;Lastly we need to logout.  To do so we create our request to &lt;code&gt;/nitro/v1/config/logout&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func logout(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/logout&amp;quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&amp;quot;logout&amp;quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-13&#34;&gt;Step Thirteen: Main (Run it all)&lt;/h3&gt;
+
+&lt;p&gt;Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableFeature(client)
+	addServers(client)
+	addServices(client)
+	addLBVservers(client)
+	bindLBVserversToServices(client)
+	addCSVserver(client)
+	addCSPolicy(client)
+	bindCSPolicyToCSVservers(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&amp;quot;done&amp;quot;)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-14&#34;&gt;Step Fourteen: Test the configuration&lt;/h3&gt;
+
+&lt;p&gt;Test the configuration by loading a browser and pointing it to the domain names you referenced in your configuration.  In the example above we utilized rserver.com, gserver.com, and bserver.com.  If you are using those examples you will need to set your local hosts file to point to the single content switching VIP we defined in &lt;a href=&#34;#step-8&#34;&gt;Step Eight&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;You should now have the ability to create a single content switching virtual server and add policies and load balancing virtual server configurations for each domain that you would like to balance.&lt;/p&gt;
+
+&lt;p&gt;You can find the full go source as well as a postman collection of the rest calls referenced in this article here:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/cs.go&#34;&gt;Full Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/cs.postman_collection.json&#34;&gt;Postman Collection&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>CPX as a DNS Server</title>
+      <link>http://bt.logic.bz/post/cpx-as-a-dns-server/</link>
+      <pubDate>Wed, 28 Sep 2016 15:30:45 -0500</pubDate>
+      
+      <guid>http://bt.logic.bz/post/cpx-as-a-dns-server/</guid>
+      <description>
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;In today&amp;rsquo;s environments, &lt;strong&gt;DNS&lt;/strong&gt; is extremely important.  The NetScaler CPX can be used provide DNS Services to hosts within your infrastructure allowing you to not have to use additional resources to spin up a separate DNS server.  In this guide I will show how to configure the NetScaler CPX to become a DNS server via it&amp;rsquo;s REST API called NITRO using Go.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own &lt;a href=&#34;https://www.getpostman.com/&#34;&gt;postman client&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&#34;prerequisites&#34;&gt;Prerequisites&lt;/h2&gt;
+
+&lt;p&gt;This guide assumes that you have a NetScaler CPX deployed within a docker environment.&lt;/p&gt;
+
+&lt;p&gt;The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://www.microloadbalancer.com&#34;&gt;https://www.microloadbalancer.com&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&#34;&gt;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&#34;&gt;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://layer7.wordpress.com/&#34;&gt;https://layer7.wordpress.com/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;When these requirements are fulfilled you can continue with this guide.&lt;/p&gt;
+
+&lt;h2 id=&#34;example-configuration&#34;&gt;Example Configuration&lt;/h2&gt;
+
+&lt;p&gt;For demonstration purposes we are going to set up DNS Services on the NetScaler CPX and add two A (Host) records &lt;strong&gt;r.cluster.local&lt;/strong&gt; and &lt;strong&gt;g.cluser.local&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;step-1&#34;&gt;Step One: Imports, Variables, and Helper Functions&lt;/h3&gt;
+
+&lt;p&gt;The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing &lt;code&gt;net/http&lt;/code&gt; for each request with a few other imports to handle formatting and parsing.  The &lt;code&gt;net/http/cookiejar&lt;/code&gt; is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;package main
+
+import (
+	&amp;quot;net/http&amp;quot;
+	&amp;quot;io/ioutil&amp;quot;
+	&amp;quot;bytes&amp;quot;
+	&amp;quot;net/http/cookiejar&amp;quot;
+	&amp;quot;fmt&amp;quot;
+	&amp;quot;encoding/json&amp;quot;
+)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;The debug boolean allows Go to output simple debugging to stdout throughout the script.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;const cpxip string = &amp;quot;192.168.6.5&amp;quot;
+const cpxport string = &amp;quot;80&amp;quot;
+const cpxusername string = &amp;quot;nsroot&amp;quot;
+const cpxpassword string = &amp;quot;nsroot&amp;quot;
+const debug bool = true
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Next, we will define a helper function &lt;code&gt;postReq&lt;/code&gt; that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;POST&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;In last stage of Step One, we will define a helper function &lt;code&gt;putReq&lt;/code&gt; that will accept our HTTP client, a URL, and our put data.  This function will make the HTTP PUT Request to NetScaler and output debugging if enabled.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func putReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;PUT&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-2&#34;&gt;Step Two: Login&lt;/h3&gt;
+
+&lt;p&gt;Now that we have our initialization steps complete from &lt;a href=&#34;#step-1&#34;&gt;Step One&lt;/a&gt;, we are able to login.  Here we define the login function which points to &lt;code&gt;/nitro/v1/config/login&lt;/code&gt;.  We also define our post data, including the &lt;code&gt;username&lt;/code&gt;, &lt;code&gt;password&lt;/code&gt;, and &lt;code&gt;timeout&lt;/code&gt; fields.  We send this post to the &lt;code&gt;postReq&lt;/code&gt; helper function.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;It is important to note that as long as the user name and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func login(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/login&amp;quot;
+	
+	type Login struct {
+		Username string `json:&amp;quot;username&amp;quot;`
+		Password string `json:&amp;quot;password&amp;quot;`
+		Timeout int `json:&amp;quot;timeout&amp;quot;`
+	}
+	type PostData struct {
+		Login Login `json:&amp;quot;login&amp;quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-3&#34;&gt;Step Three: Enabling DNS Recursion&lt;/h3&gt;
+
+&lt;p&gt;Now that we are authenticated from &lt;a href=&#34;#step-2&#34;&gt;Step Two&lt;/a&gt; we can begin the configuration.  We first need to enable the NetScaler Functionality that will allow NetScaler to ask external DNS services our query if NetScaler does not own that record, or &lt;strong&gt;DNS Recursion&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;p&gt;To do so we will create a HTTP Put request to &lt;code&gt;/nitro/v1/config/dnsparameter&lt;/code&gt;.  This request will have our parameter set in the PutData.  We will then pass the info to &lt;code&gt;putReq&lt;/code&gt; to handle our request.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func enableDNSRecursion(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/dnsparameter&amp;quot;
+
+	type Dnsparameter struct {
+		Recursion string `json:&amp;quot;recursion&amp;quot;`
+	}
+	type PostData struct {
+		Dnsparameter Dnsparameter `json:&amp;quot;dnsparameter&amp;quot;`
+	}
+
+	data := PostData{
+		Dnsparameter{
+			Recursion: &amp;quot;ENABLED&amp;quot;,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	fmt.Println(string(out))
+	putReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-4&#34;&gt;Step Four: Add an ADNS Server&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX an Authoritative DNS, &lt;strong&gt;ADNS&lt;/strong&gt;, Server.  This allows NetScaler to respond to DNS queries.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/dnsnameserver&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In this HTTP Put request we include the local IP address NetScaler will serve DNS as well as setting the type to UDP.  The Local value designates NetScaler as the owner of this service and it is set to &lt;code&gt;true&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addADNSServer(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/dnsnameserver&amp;quot;
+
+	type Dnsnameserver struct {
+		Ip string `json:&amp;quot;ip&amp;quot;`
+		Type string `json:&amp;quot;type&amp;quot;`
+		Local bool `json:&amp;quot;local&amp;quot;`
+	}
+	type PostData struct {
+		Dnsnameserver []Dnsnameserver `json:&amp;quot;dnsnameserver&amp;quot;`
+	}
+
+	data := PostData{
+		[]Dnsnameserver{
+			Dnsnameserver{
+				Ip: &amp;quot;192.168.20.20&amp;quot;,
+				Type: &amp;quot;UDP&amp;quot;,
+				Local: true,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-5&#34;&gt;Step Five: Add DNS A (Host) Records&lt;/h3&gt;
+
+&lt;p&gt;Next, we will add two DNS A records.  To add the records we will add the &lt;strong&gt;host-name&lt;/strong&gt; and the &lt;strong&gt;IP address&lt;/strong&gt; for each service in the PostData below. We will send the request to &lt;code&gt;/nitro/v1/config/dnsaddrec&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addARecords(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/dnsaddrec&amp;quot;
+
+	type Dnsaddrec struct {
+		Hostname string `json:&amp;quot;hostname&amp;quot;`
+		Ipaddress string `json:&amp;quot;ipaddress&amp;quot;`
+	}
+	type PostData struct {
+		Dnsaddrec []Dnsaddrec `json:&amp;quot;dnsaddrec&amp;quot;`
+	}
+
+	data := PostData{
+		[]Dnsaddrec{
+			Dnsaddrec{
+				Hostname: &amp;quot;r.cluster.local&amp;quot;,
+				Ipaddress: &amp;quot;10.10.10.10&amp;quot;,
+				},
+			Dnsaddrec{
+				Hostname: &amp;quot;g.cluster.local&amp;quot;,
+				Ipaddress: &amp;quot;10.10.10.11&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-6&#34;&gt;Step Six: Save Configuration&lt;/h3&gt;
+
+&lt;p&gt;Our configuration is done!  We should have a working DNS Server running on NetScaler, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.&lt;/p&gt;
+
+&lt;p&gt;We save the config by posting our data defined below to &lt;code&gt;/nitro/v1/config/nsconfig?action=save&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func saveConfig(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsconfig?action=save&amp;quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&amp;quot;nsconfig&amp;quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-7&#34;&gt;Step Seven: Logout&lt;/h3&gt;
+
+&lt;p&gt;Lastly we need to logout.  To do so we create our request to &lt;code&gt;/nitro/v1/config/logout&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func logout(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/logout&amp;quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&amp;quot;logout&amp;quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-8&#34;&gt;Step Eight: Main (Run it all)&lt;/h3&gt;
+
+&lt;p&gt;Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableDNSRecursion(client)
+	addADNSServer(client)
+	addARecords(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&amp;quot;done&amp;quot;)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-9&#34;&gt;Step Nine: Test the configuration&lt;/h3&gt;
+
+&lt;p&gt;Test the configuration by loading a browser and pointing it to the domain names you referenced in your configuration.  You will need to configure your local machine&amp;rsquo;s DNS server to point to the NetScaler&amp;rsquo;s ADNS IP Address you added in &lt;a href=&#34;#step-4&#34;&gt;Step Four&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;You should now have the ability to create an ADNS Server on NetScaler to serve DNS to clients in your environment.&lt;/p&gt;
+
+&lt;p&gt;You can find the full go source as well as a postman collection of the rest calls referenced in this article here:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/dnsserver.go&#34;&gt;Full Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/dnsserver.postman_collection.json&#34;&gt;Postman Collection&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Autoscale DNS Based Service Groups</title>
+      <link>http://bt.logic.bz/post/autoscale-dns-based-service-groups/</link>
+      <pubDate>Wed, 28 Sep 2016 15:30:38 -0500</pubDate>
+      
+      <guid>http://bt.logic.bz/post/autoscale-dns-based-service-groups/</guid>
+      <description>
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;When using NetScaler CPX, &lt;strong&gt;DNS based service groups&lt;/strong&gt; can be used to auto-scale services by the NetScaler CPX automatically preforming DNS lookups on a given host name.  These records will then be automatically added to a service group to be load balanced. In this guide I will show how to configure DNS based service groups on NetScaler CPX via it&amp;rsquo;s REST API called NITRO using Go.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own &lt;a href=&#34;https://www.getpostman.com/&#34;&gt;postman client&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&#34;prerequisites&#34;&gt;Prerequisites&lt;/h2&gt;
+
+&lt;p&gt;This guide assumes that you have a NetScaler CPX deployed within a docker environment. We also assume that you have more than one web servers and a DNS service to utilize auto-scale.&lt;/p&gt;
+
+&lt;p&gt;The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://www.microloadbalancer.com&#34;&gt;https://www.microloadbalancer.com&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&#34;&gt;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&#34;&gt;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://layer7.wordpress.com/&#34;&gt;https://layer7.wordpress.com/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;When these requirements are fulfilled you can continue with this guide.&lt;/p&gt;
+
+&lt;h2 id=&#34;example-configuration&#34;&gt;Example Configuration&lt;/h2&gt;
+
+&lt;p&gt;For demonstration purposes we are going to set up auto-scale using the host name &lt;strong&gt;qserver.com&lt;/strong&gt; with our NetScaler CPX.&lt;/p&gt;
+
+&lt;h3 id=&#34;step-1&#34;&gt;Step One: Imports, Variables, and Helper Functions&lt;/h3&gt;
+
+&lt;p&gt;The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing &lt;code&gt;net/http&lt;/code&gt; for each request with a few other imports to handle formatting and parsing.  The &lt;code&gt;net/http/cookiejar&lt;/code&gt; is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;package main
+
+import (
+	&amp;quot;net/http&amp;quot;
+	&amp;quot;io/ioutil&amp;quot;
+	&amp;quot;bytes&amp;quot;
+	&amp;quot;net/http/cookiejar&amp;quot;
+	&amp;quot;fmt&amp;quot;
+	&amp;quot;encoding/json&amp;quot;
+)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;The debug boolean allows Go to output simple debugging to stdout throughout the script.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;const cpxip string = &amp;quot;192.168.6.5&amp;quot;
+const cpxport string = &amp;quot;80&amp;quot;
+const cpxusername string = &amp;quot;nsroot&amp;quot;
+const cpxpassword string = &amp;quot;nsroot&amp;quot;
+const debug bool = true
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Next, we will define a helper function &lt;code&gt;postReq&lt;/code&gt; that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;POST&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-2&#34;&gt;Step Two: Login&lt;/h3&gt;
+
+&lt;p&gt;Now that we have our initialization steps complete from &lt;a href=&#34;#step-1&#34;&gt;Step One&lt;/a&gt;, we are able to login.  Here we define the login function which points to &lt;code&gt;/nitro/v1/config/login&lt;/code&gt;.  We also define our post data, including the &lt;code&gt;username&lt;/code&gt;, &lt;code&gt;password&lt;/code&gt;, and &lt;code&gt;timeout&lt;/code&gt; fields.  We send this post to the &lt;code&gt;postReq&lt;/code&gt; helper function.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;It is important to note that as long as the username and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func login(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/login&amp;quot;
+	
+	type Login struct {
+		Username string `json:&amp;quot;username&amp;quot;`
+		Password string `json:&amp;quot;password&amp;quot;`
+		Timeout int `json:&amp;quot;timeout&amp;quot;`
+	}
+	type PostData struct {
+		Login Login `json:&amp;quot;login&amp;quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-3&#34;&gt;Step Three: Enabling Features&lt;/h3&gt;
+
+&lt;p&gt;Now that we are authenticated from &lt;a href=&#34;#step-2&#34;&gt;Step Two&lt;/a&gt; we can begin the configuration.  We first need to enable the NetScaler Features that we will utilize in this demo.&lt;/p&gt;
+
+&lt;p&gt;We will need:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Load Balancing (LB)&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;To do so we will create a request to &lt;code&gt;/nitro/v1/config/nsfeature?action=enable&lt;/code&gt;.  This request will have our nsfeatures (LB) set in an array.  We will then pass the info to &lt;code&gt;postReq&lt;/code&gt; to handle our request.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func enableFeature(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsfeature?action=enable&amp;quot;
+
+	type NsFeature struct {
+		Feature []string `json:&amp;quot;feature&amp;quot;`
+	}
+	type PostData struct {
+		NsFeature NsFeature `json:&amp;quot;nsfeature&amp;quot;`
+	}
+
+	data := PostData{
+		NsFeature{
+			Feature: []string{&amp;quot;LB&amp;quot;},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-4&#34;&gt;Step Four: Add Servers&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX aware of the back-end servers.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/server&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we will use the domain field to allow CPX to lookup the server IPs via DNS.:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Name&lt;/strong&gt;: qserver.com
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Domain&lt;/strong&gt;: qserver.com&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/server&amp;quot;
+
+	type Server struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Domain string `json:&amp;quot;domain&amp;quot;`
+		Comment string `json:&amp;quot;comment&amp;quot;`
+	}
+	type PostData struct {
+		Server []Server `json:&amp;quot;server&amp;quot;`
+	}
+
+	data := PostData{
+		[]Server{
+			Server{
+				Name: &amp;quot;qserver.com&amp;quot;,
+				Domain: &amp;quot;qserver.com&amp;quot;,
+				Comment: &amp;quot;Q Web Server&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-5&#34;&gt;Step Five: Define a Service Group&lt;/h3&gt;
+
+&lt;p&gt;The next step is to create a &lt;strong&gt;service group&lt;/strong&gt;.  A service group is a grouping of the same application or port open on multiple servers.  It&amp;rsquo;s purpose is so that we can bind these like services to a vserver like a load balancing virtual server.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/servicegroup&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we enable DNS auto-scale and specify service type and a name.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServiceGroup(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/servicegroup&amp;quot;
+
+	type Servicegroup struct {
+		Servicegroupname string `json:&amp;quot;servicegroupname&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Autoscale string `json:&amp;quot;autoscale&amp;quot;`
+	}
+	type PostData struct {
+		Servicegroup Servicegroup `json:&amp;quot;servicegroup&amp;quot;`
+	}
+
+	data := PostData{
+		Servicegroup{
+			Servicegroupname: &amp;quot;svg-qserver.com&amp;quot;,
+			Servicetype: &amp;quot;HTTP&amp;quot;,
+			Autoscale: &amp;quot;DNS&amp;quot;,
+			},
+	}
+
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-6&#34;&gt;Step Six: Bind Servers to the Service Group&lt;/h3&gt;
+
+&lt;p&gt;Next we will need to bind our servers we created in &lt;a href=&#34;#step-4&#34;&gt;Step Four&lt;/a&gt; to the service group we created in &lt;a href=&#34;#step-5&#34;&gt;Step Five&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Here we create the request to the url &lt;code&gt;/nitro/v1/config/servicegroup_servicegroupmember_binding&lt;/code&gt;.  We define the service group name, the server name, and the port that is open on that server.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindServerToServiceGroup(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/servicegroup_servicegroupmember_binding&amp;quot;
+
+	type Servicegroup_servicegroupmember_binding struct {
+		Servicegroupname string `json:&amp;quot;servicegroupname&amp;quot;`
+		Servername string `json:&amp;quot;servername&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Servicegroup_servicegroupmember_binding Servicegroup_servicegroupmember_binding `json:&amp;quot;servicegroup_servicegroupmember_binding&amp;quot;`
+	}
+
+	data := PostData{
+		Servicegroup_servicegroupmember_binding{
+			Servicegroupname: &amp;quot;svg-qserver.com&amp;quot;,
+			Servername: &amp;quot;qserver.com&amp;quot;,
+			Port: 80,
+			},
+	}
+
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-7&#34;&gt;Step Seven: Add Load Balancing Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;We will next create load balancing virtual server on the NetScaler.  This virtual servers will load balance all of the machines who have the host name &lt;strong&gt;qserver.com&lt;/strong&gt; as defined in &lt;a href=&#34;#step-6&#34;&gt;Step Six&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;To do so we will create the post call to &lt;code&gt;/nitro/v1/config/lbvserver&lt;/code&gt; with the data of virtual server name, HTTP as the service type, and the virtual IP (ipv46).&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addLBVservers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver&amp;quot;
+
+	type Lbvserver struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Ipv46 string `json:&amp;quot;ipv46&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver []Lbvserver `json:&amp;quot;lbvserver&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver{
+			Lbvserver{
+				Name: &amp;quot;lbvs-http-qserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Ipv46: &amp;quot;192.168.20.17&amp;quot;,
+				Port: 80,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-8&#34;&gt;Step Eight: Bind Services to Virtual Servers&lt;/h3&gt;
+
+&lt;p&gt;The next step is to bind the service to the load balancing virtual server we just created.  Binding the services allows the NetScaler to load balance servers behind a single entry point.&lt;/p&gt;
+
+&lt;p&gt;We will create our post request to &lt;code&gt;/nitro/v1/config/lbvserver_service_binding&lt;/code&gt;.  The post data binds load balancing virtual name and service name.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindLBVserverToServiceGroup(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver_servicegroup_binding&amp;quot;
+
+	type Lbvserver_servicegroup_binding struct {
+		Servicegroupname string `json:&amp;quot;servicegroupname&amp;quot;`
+		Name string `json:&amp;quot;name&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver_servicegroup_binding Lbvserver_servicegroup_binding `json:&amp;quot;lbvserver_servicegroup_binding&amp;quot;`
+	}
+
+	data := PostData{
+		Lbvserver_servicegroup_binding{
+			Servicegroupname: &amp;quot;svg-qserver.com&amp;quot;,
+			Name: &amp;quot;lbvs-http-qserver.com&amp;quot;,
+			},
+	}
+
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-9&#34;&gt;Step Nine: Save Configuration&lt;/h3&gt;
+
+&lt;p&gt;Our configuration is done!  We should have a working load balancing virtual server with a DNS name backed auto-scale service group now, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.&lt;/p&gt;
+
+&lt;p&gt;We save the config by posting our data defined below to &lt;code&gt;/nitro/v1/config/nsconfig?action=save&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func saveConfig(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsconfig?action=save&amp;quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&amp;quot;nsconfig&amp;quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-10&#34;&gt;Step Ten: Logout&lt;/h3&gt;
+
+&lt;p&gt;Lastly we need to logout.  To do so we create our request to &lt;code&gt;/nitro/v1/config/logout&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func logout(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/logout&amp;quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&amp;quot;logout&amp;quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-11&#34;&gt;Step Eleven: Main (Run it all)&lt;/h3&gt;
+
+&lt;p&gt;Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableFeature(client)
+	addServers(client)
+	addServiceGroup(client)
+	bindServerToServiceGroup(client)
+	addLBVservers(client)
+	bindLBVserverToServiceGroup(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&amp;quot;done&amp;quot;)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-12&#34;&gt;Step Twelve: Test the configuration&lt;/h3&gt;
+
+&lt;p&gt;Test the configuration by loading a browser and pointing it to the VIP you referenced in your configuration in &lt;a href=&#34;#step-7&#34;&gt;Step Seven&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;You should now have the ability to create a auto-scale DNS based service group behind a load balancing virtual server.&lt;/p&gt;
+
+&lt;p&gt;You can find the full go source as well as a postman collection of the rest calls referenced in this article here:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/autoscaledns.go&#34;&gt;Full Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/autoscaledns.postman_collection.json&#34;&gt;Postman Collection&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>SSL Offloading</title>
+      <link>http://bt.logic.bz/post/ssl-offloading/</link>
+      <pubDate>Wed, 28 Sep 2016 15:30:00 -0500</pubDate>
+      
+      <guid>http://bt.logic.bz/post/ssl-offloading/</guid>
+      <description>
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;When using NetScaler CPX, &lt;strong&gt;SSL Offloading&lt;/strong&gt; can be used to terminate SSL connections on the NetScaler. This allows for a high degree of efficiency as back-end services do not need to waste valuable resources handling SSL, instead they can focus on their application code and NetScaler can focus on handling the Client Security. In this guide I will show how to configure SSL Offloading on NetScaler CPX via it&amp;rsquo;s REST API called NITRO using Go.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own &lt;a href=&#34;https://www.getpostman.com/&#34;&gt;postman client&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&#34;prerequisites&#34;&gt;Prerequisites&lt;/h2&gt;
+
+&lt;p&gt;This guide assumes that you have a NetScaler CPX deployed within a docker environment. We also assume that you have more than one web server to place behind the content switch.&lt;/p&gt;
+
+&lt;p&gt;The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://www.microloadbalancer.com&#34;&gt;https://www.microloadbalancer.com&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&#34;&gt;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&#34;&gt;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://layer7.wordpress.com/&#34;&gt;https://layer7.wordpress.com/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;When these requirements are fulfilled you can continue with this guide.&lt;/p&gt;
+
+&lt;h2 id=&#34;example-configuration&#34;&gt;Example Configuration&lt;/h2&gt;
+
+&lt;p&gt;For demonstration purposes we are going to set up SSL offloading on NetScaler.  NetScaler will handle client connections to a single web page via HTTPS and will load balance a single HTTP service on the back-end, &lt;strong&gt;rserver.com&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;step-1&#34;&gt;Step One: Imports, Variables, and Helper Functions&lt;/h3&gt;
+
+&lt;p&gt;The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing &lt;code&gt;net/http&lt;/code&gt; for each request with a few other imports to handle formatting and parsing.  The &lt;code&gt;net/http/cookiejar&lt;/code&gt; is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;package main
+
+import (
+	&amp;quot;net/http&amp;quot;
+	&amp;quot;io/ioutil&amp;quot;
+	&amp;quot;bytes&amp;quot;
+	&amp;quot;net/http/cookiejar&amp;quot;
+	&amp;quot;fmt&amp;quot;
+	&amp;quot;encoding/json&amp;quot;
+	&amp;quot;encoding/base64&amp;quot;
+)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;The debug boolean allows Go to output simple debugging to stdout throughout the script.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;const cpxip string = &amp;quot;192.168.6.5&amp;quot;
+const cpxport string = &amp;quot;80&amp;quot;
+const cpxusername string = &amp;quot;nsroot&amp;quot;
+const cpxpassword string = &amp;quot;nsroot&amp;quot;
+const debug bool = true
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Next, we will define a helper function &lt;code&gt;postReq&lt;/code&gt; that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;POST&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-2&#34;&gt;Step Two: Login&lt;/h3&gt;
+
+&lt;p&gt;Now that we have our initialization steps complete from &lt;a href=&#34;#step-1&#34;&gt;Step One&lt;/a&gt;, we are able to login.  Here we define the login function which points to &lt;code&gt;/nitro/v1/config/login&lt;/code&gt;.  We also define our post data, including the &lt;code&gt;username&lt;/code&gt;, &lt;code&gt;password&lt;/code&gt;, and &lt;code&gt;timeout&lt;/code&gt; fields.  We send this post to the &lt;code&gt;postReq&lt;/code&gt; helper function.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;It is important to note that as long as the user name and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func login(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/login&amp;quot;
+	
+	type Login struct {
+		Username string `json:&amp;quot;username&amp;quot;`
+		Password string `json:&amp;quot;password&amp;quot;`
+		Timeout int `json:&amp;quot;timeout&amp;quot;`
+	}
+	type PostData struct {
+		Login Login `json:&amp;quot;login&amp;quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-3&#34;&gt;Step Three: Enabling Features&lt;/h3&gt;
+
+&lt;p&gt;Now that we are authenticated from &lt;a href=&#34;#step-2&#34;&gt;Step Two&lt;/a&gt; we can begin the configuration.  We first need to enable the NetScaler Features that we will utilize in this example.&lt;/p&gt;
+
+&lt;p&gt;We will need both:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Load Balancing (LB)&lt;/li&gt;
+&lt;li&gt;SSL Offloading (SSL)&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;To do so we will create a request to &lt;code&gt;/nitro/v1/config/nsfeature?action=enable&lt;/code&gt;.  This request will have our nsfeatures (LB and SSL) set in an array.  We will then pass the info to &lt;code&gt;postReq&lt;/code&gt; to handle our request.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func enableFeature(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsfeature?action=enable&amp;quot;
+
+	type NsFeature struct {
+		Feature []string `json:&amp;quot;feature&amp;quot;`
+	}
+	type PostData struct {
+		NsFeature NsFeature `json:&amp;quot;nsfeature&amp;quot;`
+	}
+
+	data := PostData{
+		NsFeature{
+			Feature: []string{&amp;quot;LB&amp;quot;, &amp;quot;SSL&amp;quot;},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-4&#34;&gt;Step Four: Upload Public and Private Cert and Key Files&lt;/h3&gt;
+
+&lt;p&gt;The next step is to upload the Public and Private Certificate files to NetScaler CPX. To do so we will create a post request to &lt;code&gt;/nitro/v1/config/systemfile&lt;/code&gt; and include our files. This will upload both files to &lt;code&gt;/nsconfig/ssl/rs.crt&lt;/code&gt; and &lt;code&gt;/nsconfig/ssl/rs.key&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func uploadCertAndKeyFiles(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/systemfile&amp;quot;
+
+	type Systemfile struct {
+		Filename string `json:&amp;quot;filename&amp;quot;`
+		Filelocation string `json:&amp;quot;filelocation&amp;quot;`
+		Filecontent string `json:&amp;quot;filecontent&amp;quot;`
+		Fileencoding string `json:&amp;quot;fileencoding&amp;quot;`
+	}
+	type PostData struct {
+		Systemfile []Systemfile `json:&amp;quot;systemfile&amp;quot;`
+	}
+
+	rscrt := base64.StdEncoding.EncodeToString([]byte(`-----BEGIN CERTIFICATE-----
+&amp;lt;cert file contents go here...&amp;gt;
+-----END CERTIFICATE-----
+`))
+	rskey := base64.StdEncoding.EncodeToString([]byte(`-----BEGIN RSA PRIVATE KEY-----
+&amp;lt;key file contents go here...&amp;gt;
+-----END RSA PRIVATE KEY-----
+`))
+
+	data := PostData{
+		[]Systemfile{
+			Systemfile{
+				Filename: &amp;quot;rs.crt&amp;quot;,
+				Filelocation: &amp;quot;/nsconfig/ssl/&amp;quot;,
+				Filecontent: rscrt,
+				Fileencoding: &amp;quot;BASE64&amp;quot;,
+				},
+			Systemfile{
+				Filename: &amp;quot;rs.key&amp;quot;,
+				Filelocation: &amp;quot;/nsconfig/ssl/&amp;quot;,
+				Filecontent: rskey,
+				Fileencoding: &amp;quot;BASE64&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-5&#34;&gt;Step Five: Install Public and Private Cert and Key Files&lt;/h3&gt;
+
+&lt;p&gt;The next step is to install the Public and Private Certificate files to NetScaler CPX. To do so we will create a post request to &lt;code&gt;/nitro/v1/config/sslcertkey&lt;/code&gt; and include our file locations of &lt;code&gt;rs.key&lt;/code&gt; and &lt;code&gt;rs.crt&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func installCrtKey(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/sslcertkey&amp;quot;
+	
+	type Sslcertkey struct {
+		Certkey string `json:&amp;quot;certkey&amp;quot;`
+		Cert string `json:&amp;quot;cert&amp;quot;`
+		Key string `json:&amp;quot;key&amp;quot;`
+	}
+	type PostData struct {
+		Sslcertkey Sslcertkey `json:&amp;quot;sslcertkey&amp;quot;`
+	}
+
+	data := PostData{
+		Sslcertkey{
+			Certkey: &amp;quot;rs&amp;quot;,
+			Cert: &amp;quot;/nsconfig/ssl/rs.crt&amp;quot;,
+			Key: &amp;quot;/nsconfig/ssl/rs.key&amp;quot;,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-6&#34;&gt;Step Six: Add Servers&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX aware of the back-end servers.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/server&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we will make CPX aware of a single back-end server, but you can add more if you need to:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;rserver.com
+
+&lt;ul&gt;
+&lt;li&gt;10.21.0.95&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/server&amp;quot;
+
+	type Server struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Ipaddress string `json:&amp;quot;ipaddress&amp;quot;`
+		Comment string `json:&amp;quot;comment&amp;quot;`
+	}
+	type PostData struct {
+		Server []Server `json:&amp;quot;server&amp;quot;`
+	}
+
+	data := PostData{
+		[]Server{
+			Server{
+				Name: &amp;quot;rserver.com&amp;quot;,
+				Ipaddress: &amp;quot;10.21.0.95&amp;quot;,
+				Comment: &amp;quot;R Web Server&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-7&#34;&gt;Step Seven: Add Services&lt;/h3&gt;
+
+&lt;p&gt;The next step is to make the NetScaler CPX aware of the back-end servers services.  A service is an application or port open on the server.  To do so we will create a post request to &lt;code&gt;/nitro/v1/config/service&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In the example below we will make CPX aware of a single service:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;rserver.com
+
+&lt;ul&gt;
+&lt;li&gt;http/80&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addServices(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/service&amp;quot;
+
+	type Service struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servername string `json:&amp;quot;servername&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Service []Service `json:&amp;quot;service&amp;quot;`
+	}
+
+	data := PostData{
+		[]Service{
+			Service{
+				Name: &amp;quot;http-rserver.com&amp;quot;,
+				Servername: &amp;quot;rserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Port: 80,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-8&#34;&gt;Step Eight: Add a Load Balancing Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;We will next create a load balancing virtual server on the NetScaler.  This service will handle HTTPS connections and we will mark the type and port as &lt;code&gt;ssl&lt;/code&gt; and &lt;code&gt;443&lt;/code&gt; respectively.&lt;/p&gt;
+
+&lt;p&gt;To do so we will create the post call to &lt;code&gt;/nitro/v1/config/lbvserver&lt;/code&gt; with the data of virtual server.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addLBVservers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver&amp;quot;
+
+	type Lbvserver struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Ipv46 string `json:&amp;quot;ipv46&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver []Lbvserver `json:&amp;quot;lbvserver&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver{
+			Lbvserver{
+				Name: &amp;quot;lbvs-ssl-rserver.com&amp;quot;,
+				Servicetype: &amp;quot;ssl&amp;quot;,
+				Ipv46: &amp;quot;192.168.20.15&amp;quot;,
+				Port: 443,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-9&#34;&gt;Step Nine: Bind Service to Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;The next step is to bind the services to the load balancing virtual server we just created.  Binding the services allows the NetScaler to load balance servers behind a single entry point.&lt;/p&gt;
+
+&lt;p&gt;We will create our post request to &lt;code&gt;/nitro/v1/config/lbvserver_service_binding&lt;/code&gt;.  The post data binds load balancing virtual names and service names.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindLBVserversToServices(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver_service_binding&amp;quot;
+
+	type Lbvserver_service_binding struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicename string `json:&amp;quot;servicename&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver_service_binding []Lbvserver_service_binding `json:&amp;quot;lbvserver_service_binding&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver_service_binding{
+			Lbvserver_service_binding{
+				Name: &amp;quot;lbvs-ssl-rserver.com&amp;quot;,
+				Servicename: &amp;quot;http-rserver.com&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-10&#34;&gt;Step Ten: Bind SSL Certificate to Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;The next step is to bind the SSL Certificate and Key to the load balancing virtual server we just created. Binding the certkey allows the NetScaler to process SSL connections.&lt;/p&gt;
+
+&lt;p&gt;We will create our post request to &lt;code&gt;/nitro/v1/config/sslvserver_sslcertkey_binding&lt;/code&gt;.  The post data binds &lt;code&gt;load balancing virtual name&lt;/code&gt; and &lt;code&gt;certkey name&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func bindLBVserversToCertKey(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/sslvserver_sslcertkey_binding&amp;quot;
+
+	type Sslvserver_sslcertkey_binding struct {
+		Vservername string `json:&amp;quot;vservername&amp;quot;`
+		Certkeyname string `json:&amp;quot;certkeyname&amp;quot;`
+	}
+	type PostData struct {
+		Sslvserver_sslcertkey_binding []Sslvserver_sslcertkey_binding `json:&amp;quot;sslvserver_sslcertkey_binding&amp;quot;`
+	}
+
+	data := PostData{
+		[]Sslvserver_sslcertkey_binding{
+			Sslvserver_sslcertkey_binding{
+				Vservername: &amp;quot;lbvs-ssl-rserver.com&amp;quot;,
+				Certkeyname: &amp;quot;rs&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-11&#34;&gt;Step Eleven: Save Configuration&lt;/h3&gt;
+
+&lt;p&gt;Our configuration is done!  We should have a working SSL Offload Load Balancing Virtual Server now, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.&lt;/p&gt;
+
+&lt;p&gt;We save the config by posting our data defined below to &lt;code&gt;/nitro/v1/config/nsconfig?action=save&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func saveConfig(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsconfig?action=save&amp;quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&amp;quot;nsconfig&amp;quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-12&#34;&gt;Step Twelve: Logout&lt;/h3&gt;
+
+&lt;p&gt;Lastly we need to logout.  To do so we create our request to &lt;code&gt;/nitro/v1/config/logout&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func logout(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/logout&amp;quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&amp;quot;logout&amp;quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-13&#34;&gt;Step Thirteen: Main (Run it all)&lt;/h3&gt;
+
+&lt;p&gt;Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableFeature(client)
+	uploadCertAndKeyFiles(client)
+	installCrtKey(client)
+	addServers(client)
+	addServices(client)
+	addLBVservers(client)
+	bindLBVserversToServices(client)
+	bindLBVserversToCertKey(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&amp;quot;done&amp;quot;)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-14&#34;&gt;Step Fourteen: Test the configuration&lt;/h3&gt;
+
+&lt;p&gt;Test the configuration by loading a browser and pointing it to the SSL load balancing virtual server you referenced in your configuration in &lt;a href=&#34;#step-8&#34;&gt;Step Eight&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;You should now have the ability to create a SSL load balancing virtual server to handle SSL connections and free up resources on your back-end hosts.&lt;/p&gt;
+
+&lt;p&gt;You can find the full go source as well as a postman collection of the rest calls referenced in this article here:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/ssloffload.go&#34;&gt;Full Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/ssloffload.postman_collection.json&#34;&gt;Postman Collection&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

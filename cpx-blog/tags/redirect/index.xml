@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>NetScaler NITRO Blogs</title>
+    <link>http://bt.logic.bz/tags/redirect/index.xml</link>
+    <description>Recent content on NetScaler NITRO Blogs</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-EN</language>
+    <copyright>&amp;copy; 2016. All rights reserved.</copyright>
+    <atom:link href="http://bt.logic.bz/tags/redirect/index.xml" rel="self" type="application/rss+xml" />
+    
+    <item>
+      <title>HTTP to HTTPS Redirect</title>
+      <link>http://bt.logic.bz/post/http-to-https-redirect/</link>
+      <pubDate>Wed, 28 Sep 2016 15:30:10 -0500</pubDate>
+      
+      <guid>http://bt.logic.bz/post/http-to-https-redirect/</guid>
+      <description>
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;When using NetScaler CPX, a &lt;strong&gt;Load Balancing Redirect URL&lt;/strong&gt; can be used to simply define a &lt;strong&gt;HTTP to HTTPS&lt;/strong&gt; Redirect.  This configures NetScaler to automatically forward users accessing your site to HTTPS in every session. In this guide I will show how to configure HTTPS redirection on NetScaler CPX via it&amp;rsquo;s REST API called NITRO using Go.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own &lt;a href=&#34;https://www.getpostman.com/&#34;&gt;postman client&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&#34;prerequisites&#34;&gt;Prerequisites&lt;/h2&gt;
+
+&lt;p&gt;This guide assumes that you have a NetScaler CPX deployed within a docker environment. We also assume that you have a website serving HTTPS. This service can also be behind a Load Balancing Virtual Server for bonus points.&lt;/p&gt;
+
+&lt;p&gt;The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://www.microloadbalancer.com&#34;&gt;https://www.microloadbalancer.com&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&#34;&gt;https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&#34;&gt;https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://layer7.wordpress.com/&#34;&gt;https://layer7.wordpress.com/&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;When these requirements are fulfilled you can continue with this guide.&lt;/p&gt;
+
+&lt;h2 id=&#34;example-configuration&#34;&gt;Example Configuration&lt;/h2&gt;
+
+&lt;p&gt;For demonstration purposes we are going to set up an Redirect URL on a standard HTTP Load Balancing Virtual Server to forward traffic to &lt;strong&gt;&lt;a href=&#34;https://rserver.com&#34;&gt;https://rserver.com&lt;/a&gt;&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;step-1&#34;&gt;Step One: Imports, Variables, and Helper Functions&lt;/h3&gt;
+
+&lt;p&gt;The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing &lt;code&gt;net/http&lt;/code&gt; for each request with a few other imports to handle formatting and parsing.  The &lt;code&gt;net/http/cookiejar&lt;/code&gt; is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;package main
+
+import (
+	&amp;quot;net/http&amp;quot;
+	&amp;quot;io/ioutil&amp;quot;
+	&amp;quot;bytes&amp;quot;
+	&amp;quot;net/http/cookiejar&amp;quot;
+	&amp;quot;fmt&amp;quot;
+	&amp;quot;encoding/json&amp;quot;
+)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;The debug boolean allows Go to output simple debugging to stdout throughout the script.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;const cpxip string = &amp;quot;192.168.6.5&amp;quot;
+const cpxport string = &amp;quot;80&amp;quot;
+const cpxusername string = &amp;quot;nsroot&amp;quot;
+const cpxpassword string = &amp;quot;nsroot&amp;quot;
+const debug bool = true
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Next, we will define a helper function &lt;code&gt;postReq&lt;/code&gt; that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&amp;quot;POST&amp;quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&amp;quot;content-type&amp;quot;, &amp;quot;application/json&amp;quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-2&#34;&gt;Step Two: Login&lt;/h3&gt;
+
+&lt;p&gt;Now that we have our initialization steps complete from &lt;a href=&#34;#step-1&#34;&gt;Step One&lt;/a&gt;, we are able to login.  Here we define the login function which points to &lt;code&gt;/nitro/v1/config/login&lt;/code&gt;.  We also define our post data, including the &lt;code&gt;username&lt;/code&gt;, &lt;code&gt;password&lt;/code&gt;, and &lt;code&gt;timeout&lt;/code&gt; fields.  We send this post to the &lt;code&gt;postReq&lt;/code&gt; helper function.&lt;/p&gt;
+
+&lt;blockquote&gt;
+&lt;p&gt;&lt;em&gt;It is important to note that as long as the user name and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.&lt;/em&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func login(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/login&amp;quot;
+	
+	type Login struct {
+		Username string `json:&amp;quot;username&amp;quot;`
+		Password string `json:&amp;quot;password&amp;quot;`
+		Timeout int `json:&amp;quot;timeout&amp;quot;`
+	}
+	type PostData struct {
+		Login Login `json:&amp;quot;login&amp;quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-3&#34;&gt;Step Three: Enabling Features&lt;/h3&gt;
+
+&lt;p&gt;Now that we are authenticated from &lt;a href=&#34;#step-2&#34;&gt;Step Two&lt;/a&gt; we can begin the configuration.  We first need to enable the NetScaler Features that we will utilize in this demo.&lt;/p&gt;
+
+&lt;p&gt;We will need:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Load Balancing (LB)&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;To do so we will create a request to &lt;code&gt;/nitro/v1/config/nsfeature?action=enable&lt;/code&gt;.  This request will have our nsfeatures (LB) set in an array.  We will then pass the info to &lt;code&gt;postReq&lt;/code&gt; to handle our request.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func enableFeature(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsfeature?action=enable&amp;quot;
+
+	type NsFeature struct {
+		Feature []string `json:&amp;quot;feature&amp;quot;`
+	}
+	type PostData struct {
+		NsFeature NsFeature `json:&amp;quot;nsfeature&amp;quot;`
+	}
+
+	data := PostData{
+		NsFeature{
+			Feature: []string{&amp;quot;LB&amp;quot;},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-4&#34;&gt;Step Four: Add an Load Balancing Virtual Server&lt;/h3&gt;
+
+&lt;p&gt;We will next create a load balancing virtual server on the NetScaler which will always redirect to &lt;code&gt;https://r.server.com&lt;/code&gt;.  This virtual server will have a &lt;code&gt;service type of HTTP&lt;/code&gt;, and &lt;code&gt;IP address&lt;/code&gt; for clients to access, the standard HTTP &lt;code&gt;port 80&lt;/code&gt;, a &lt;code&gt;name&lt;/code&gt;, and the &lt;code&gt;Redirect URL&lt;/code&gt;. If the Redirect URL is specified and the virtual server does not have any services bound, or it is marked as down, then the NetScaler will always forward the request to the redirect URL.&lt;/p&gt;
+
+&lt;p&gt;To do so we will create the post call to &lt;code&gt;/nitro/v1/config/lbvserver&lt;/code&gt; with the PostData configured with each varable listed above configured.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func addLBVservers(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/lbvserver&amp;quot;
+
+	type Lbvserver struct {
+		Name string `json:&amp;quot;name&amp;quot;`
+		Servicetype string `json:&amp;quot;servicetype&amp;quot;`
+		Ipv46 string `json:&amp;quot;ipv46&amp;quot;`
+		Port int `json:&amp;quot;port&amp;quot;`
+		Redirurl string `json:&amp;quot;redirurl&amp;quot;`
+	}
+	type PostData struct {
+		Lbvserver []Lbvserver `json:&amp;quot;lbvserver&amp;quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver{
+			Lbvserver{
+				Name: &amp;quot;lbvs-redir-http-rserver.com&amp;quot;,
+				Servicetype: &amp;quot;http&amp;quot;,
+				Ipv46: &amp;quot;192.168.20.16&amp;quot;,
+				Port: 80,
+				Redirurl: &amp;quot;https://rserver.com&amp;quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-5&#34;&gt;Step Five: Save Configuration&lt;/h3&gt;
+
+&lt;p&gt;Our configuration is done!  We should have a working HTTP to HTTPS redirect now, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.&lt;/p&gt;
+
+&lt;p&gt;We save the config by posting our data defined below to &lt;code&gt;/nitro/v1/config/nsconfig?action=save&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func saveConfig(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/nsconfig?action=save&amp;quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&amp;quot;nsconfig&amp;quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-6&#34;&gt;Step Six: Logout&lt;/h3&gt;
+
+&lt;p&gt;Lastly we need to logout.  To do so we create our request to &lt;code&gt;/nitro/v1/config/logout&lt;/code&gt;.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func logout(client http.Client) {
+	url := &amp;quot;http://&amp;quot; + cpxip + &amp;quot;:&amp;quot; + cpxport + &amp;quot;/nitro/v1/config/logout&amp;quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&amp;quot;logout&amp;quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-7&#34;&gt;Step Seven: Main (Run it all)&lt;/h3&gt;
+
+&lt;p&gt;Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-go&#34;&gt;func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableFeature(client)
+	addLBVservers(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&amp;quot;done&amp;quot;)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h3 id=&#34;step-8&#34;&gt;Step Eight: Test the configuration&lt;/h3&gt;
+
+&lt;p&gt;Test the configuration by loading a browser and pointing it to the HTTP domain name or IP address of the Load Balancing Virtual Server that you specified in &lt;a href=&#34;#step-4&#34;&gt;Step Four&lt;/a&gt;. You should see the HTTP to HTTPS redirect occur.&lt;/p&gt;
+
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;You should now have the ability to always redirect HTTP to HTTPS requests utilizing the &lt;strong&gt;Redirect URL&lt;/strong&gt; functionality of Load Balancing Virtual Servers on NetScaler.&lt;/p&gt;
+
+&lt;p&gt;You can find the full go source as well as a postman collection of the rest calls referenced in this article here:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/httpredirect.go&#34;&gt;Full Source&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;http://bt.logic.bz/code/httpredirect.postman_collection.json&#34;&gt;Postman Collection&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en-us">
+<head>
+  <title>
+    SSL Offloading // NetScaler NITRO Blogs
+  </title>
+
+  <link href="http://gmpg.org/xfn/11" rel="profile">
+<meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+<meta name="description" content="">
+<meta name="keywords" content="">
+<meta name="author" content="Brian Tannous">
+<meta name="generator" content="Hugo 0.17" />
+
+  <meta property="og:title" content="SSL Offloading" />
+<meta property="og:description" content="" />
+<meta property="og:type" content="website" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="http://bt.logic.bz/post/ssl-offloading/" />
+
+
+  
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/base-min.css">
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/pure-min.css">
+  
+  
+    <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/grids-responsive-min.css">
+  
+  
+
+  <link rel="stylesheet" href="../../css/redlounge.css">
+  <link href="http://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css" rel="stylesheet">
+  <link href='http://fonts.googleapis.com/css?family=Raleway:400,200,100,700,300,500,600,800' rel='stylesheet' type='text/css'>
+  <link href='http://fonts.googleapis.com/css?family=Libre+Baskerville:400,700,400italic' rel='stylesheet' type='text/css'>
+
+  
+  <link rel="apple-touch-icon-precomposed" sizes="144x144" href="../../touch-icon-144-precomposed.png">
+  <link rel="shortcut icon" href="../../favicon.png">
+
+  
+  <link href="index.html" rel="alternate" type="application/rss+xml" title="NetScaler NITRO Blogs" />
+
+    
+  
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/styles/github.min.css">
+  
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/highlight.min.js"></script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/languages/go.min.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+
+
+  
+
+  
+
+  
+
+  
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', "UA-85053807-1", 'auto');
+  ga('send', 'pageview');
+</script>
+
+</head>
+
+<body>
+	
+
+	<div id="layout" class="pure-g">
+    <div class="sidebar pure-u-1 pure-u-md-1-4">
+  <div class="header">
+    
+
+	
+
+    <h1 class="brand-title">NetScaler NITRO Blogs</h1>
+    <h2 class="brand-tagline">A few quick examples utilizing NetScaler CPX and GoLang</h2>
+
+    <nav class="nav">
+      <ul class="nav-list">
+        <li class="nav-item"><span class="nav-item-separator">//</span><a href="../../index.html">Home</a></li>
+        
+      </ul>
+    </nav>
+
+    
+
+  </div>
+</div>
+
+	
+	
+
+    <div class="content pure-u-1 pure-u-md-3-4">
+		<a name="top"></a>
+		
+
+		
+			
+		    <div id="toc" class="pure-u-1 pure-u-md-1-4">
+				<small class="toc-label">Contents</small>
+		   	 	<nav id="TableOfContents">
+<ul>
+<li>
+<ul>
+<li><a href="index.html#introduction">Introduction</a></li>
+<li><a href="index.html#prerequisites">Prerequisites</a></li>
+<li><a href="index.html#example-configuration">Example Configuration</a>
+<ul>
+<li><a href="index.html#step-1">Step One: Imports, Variables, and Helper Functions</a></li>
+<li><a href="index.html#step-2">Step Two: Login</a></li>
+<li><a href="index.html#step-3">Step Three: Enabling Features</a></li>
+<li><a href="index.html#step-4">Step Four: Upload Public and Private Cert and Key Files</a></li>
+<li><a href="index.html#step-5">Step Five: Install Public and Private Cert and Key Files</a></li>
+<li><a href="index.html#step-6">Step Six: Add Servers</a></li>
+<li><a href="index.html#step-7">Step Seven: Add Services</a></li>
+<li><a href="index.html#step-8">Step Eight: Add a Load Balancing Virtual Server</a></li>
+<li><a href="index.html#step-9">Step Nine: Bind Service to Virtual Server</a></li>
+<li><a href="index.html#step-10">Step Ten: Bind SSL Certificate to Virtual Server</a></li>
+<li><a href="index.html#step-11">Step Eleven: Save Configuration</a></li>
+<li><a href="index.html#step-12">Step Twelve: Logout</a></li>
+<li><a href="index.html#step-13">Step Thirteen: Main (Run it all)</a></li>
+<li><a href="index.html#step-14">Step Fourteen: Test the configuration</a></li>
+</ul></li>
+<li><a href="index.html#conclusion">Conclusion</a></li>
+</ul></li>
+</ul>
+</nav>
+		    </div>
+		    
+	    
+  		<section class="post">
+            <h1 class="post-title">
+              <a href="index.html">SSL Offloading</a>
+            </h1>
+            <h3 class="post-subtitle">
+            	
+            </h3>
+            
+            	<span class="post-date">
+                	<span class="post-date-day"><sup>28</sup></span><span class="post-date-separator">/</span><span class="post-date-month">Sep</span> <span class="post-date-year">2016</span>
+            	</span>
+            	
+            
+            	
+            		<span class="post-author-single">By <a class="post-author"  target="">Brian Tannous</a></span>
+            		
+
+
+
+
+            	
+            
+
+			
+			
+
+			
+
+			
+
+            
+
+<h2 id="introduction">Introduction</h2>
+
+<p>When using NetScaler CPX, <strong>SSL Offloading</strong> can be used to terminate SSL connections on the NetScaler. This allows for a high degree of efficiency as back-end services do not need to waste valuable resources handling SSL, instead they can focus on their application code and NetScaler can focus on handling the Client Security. In this guide I will show how to configure SSL Offloading on NetScaler CPX via it&rsquo;s REST API called NITRO using Go.</p>
+
+<blockquote>
+<p><em>While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)</em></p>
+
+<p><em>This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own <a href="https://www.getpostman.com/">postman client</a>.</em></p>
+</blockquote>
+
+<h2 id="prerequisites">Prerequisites</h2>
+
+<p>This guide assumes that you have a NetScaler CPX deployed within a docker environment. We also assume that you have more than one web server to place behind the content switch.</p>
+
+<p>The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:</p>
+
+<ul>
+<li><a href="https://www.microloadbalancer.com">https://www.microloadbalancer.com</a></li>
+<li><a href="https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html">https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html</a></li>
+<li><a href="https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html">https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html</a></li>
+<li><a href="https://layer7.wordpress.com/">https://layer7.wordpress.com/</a></li>
+</ul>
+
+<p>When these requirements are fulfilled you can continue with this guide.</p>
+
+<h2 id="example-configuration">Example Configuration</h2>
+
+<p>For demonstration purposes we are going to set up SSL offloading on NetScaler.  NetScaler will handle client connections to a single web page via HTTPS and will load balance a single HTTP service on the back-end, <strong>rserver.com</strong>.</p>
+
+<h3 id="step-1">Step One: Imports, Variables, and Helper Functions</h3>
+
+<p>The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing <code>net/http</code> for each request with a few other imports to handle formatting and parsing.  The <code>net/http/cookiejar</code> is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.</p>
+
+<pre><code class="language-go">package main
+
+import (
+	&quot;net/http&quot;
+	&quot;io/ioutil&quot;
+	&quot;bytes&quot;
+	&quot;net/http/cookiejar&quot;
+	&quot;fmt&quot;
+	&quot;encoding/json&quot;
+	&quot;encoding/base64&quot;
+)
+</code></pre>
+
+<p>Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.</p>
+
+<blockquote>
+<p><em>The debug boolean allows Go to output simple debugging to stdout throughout the script.</em></p>
+</blockquote>
+
+<pre><code class="language-go">const cpxip string = &quot;192.168.6.5&quot;
+const cpxport string = &quot;80&quot;
+const cpxusername string = &quot;nsroot&quot;
+const cpxpassword string = &quot;nsroot&quot;
+const debug bool = true
+</code></pre>
+
+<p>Next, we will define a helper function <code>postReq</code> that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.</p>
+
+<pre><code class="language-go">func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&quot;POST&quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&quot;content-type&quot;, &quot;application/json&quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+</code></pre>
+
+<h3 id="step-2">Step Two: Login</h3>
+
+<p>Now that we have our initialization steps complete from <a href="index.html#step-1">Step One</a>, we are able to login.  Here we define the login function which points to <code>/nitro/v1/config/login</code>.  We also define our post data, including the <code>username</code>, <code>password</code>, and <code>timeout</code> fields.  We send this post to the <code>postReq</code> helper function.</p>
+
+<blockquote>
+<p><em>It is important to note that as long as the user name and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.</em></p>
+</blockquote>
+
+<pre><code class="language-go">func login(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/login&quot;
+	
+	type Login struct {
+		Username string `json:&quot;username&quot;`
+		Password string `json:&quot;password&quot;`
+		Timeout int `json:&quot;timeout&quot;`
+	}
+	type PostData struct {
+		Login Login `json:&quot;login&quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-3">Step Three: Enabling Features</h3>
+
+<p>Now that we are authenticated from <a href="index.html#step-2">Step Two</a> we can begin the configuration.  We first need to enable the NetScaler Features that we will utilize in this example.</p>
+
+<p>We will need both:</p>
+
+<ul>
+<li>Load Balancing (LB)</li>
+<li>SSL Offloading (SSL)</li>
+</ul>
+
+<p>To do so we will create a request to <code>/nitro/v1/config/nsfeature?action=enable</code>.  This request will have our nsfeatures (LB and SSL) set in an array.  We will then pass the info to <code>postReq</code> to handle our request.</p>
+
+<pre><code class="language-go">func enableFeature(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/nsfeature?action=enable&quot;
+
+	type NsFeature struct {
+		Feature []string `json:&quot;feature&quot;`
+	}
+	type PostData struct {
+		NsFeature NsFeature `json:&quot;nsfeature&quot;`
+	}
+
+	data := PostData{
+		NsFeature{
+			Feature: []string{&quot;LB&quot;, &quot;SSL&quot;},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-4">Step Four: Upload Public and Private Cert and Key Files</h3>
+
+<p>The next step is to upload the Public and Private Certificate files to NetScaler CPX. To do so we will create a post request to <code>/nitro/v1/config/systemfile</code> and include our files. This will upload both files to <code>/nsconfig/ssl/rs.crt</code> and <code>/nsconfig/ssl/rs.key</code>.</p>
+
+<pre><code class="language-go">func uploadCertAndKeyFiles(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/systemfile&quot;
+
+	type Systemfile struct {
+		Filename string `json:&quot;filename&quot;`
+		Filelocation string `json:&quot;filelocation&quot;`
+		Filecontent string `json:&quot;filecontent&quot;`
+		Fileencoding string `json:&quot;fileencoding&quot;`
+	}
+	type PostData struct {
+		Systemfile []Systemfile `json:&quot;systemfile&quot;`
+	}
+
+	rscrt := base64.StdEncoding.EncodeToString([]byte(`-----BEGIN CERTIFICATE-----
+&lt;cert file contents go here...&gt;
+-----END CERTIFICATE-----
+`))
+	rskey := base64.StdEncoding.EncodeToString([]byte(`-----BEGIN RSA PRIVATE KEY-----
+&lt;key file contents go here...&gt;
+-----END RSA PRIVATE KEY-----
+`))
+
+	data := PostData{
+		[]Systemfile{
+			Systemfile{
+				Filename: &quot;rs.crt&quot;,
+				Filelocation: &quot;/nsconfig/ssl/&quot;,
+				Filecontent: rscrt,
+				Fileencoding: &quot;BASE64&quot;,
+				},
+			Systemfile{
+				Filename: &quot;rs.key&quot;,
+				Filelocation: &quot;/nsconfig/ssl/&quot;,
+				Filecontent: rskey,
+				Fileencoding: &quot;BASE64&quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-5">Step Five: Install Public and Private Cert and Key Files</h3>
+
+<p>The next step is to install the Public and Private Certificate files to NetScaler CPX. To do so we will create a post request to <code>/nitro/v1/config/sslcertkey</code> and include our file locations of <code>rs.key</code> and <code>rs.crt</code>.</p>
+
+<pre><code class="language-go">func installCrtKey(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/sslcertkey&quot;
+	
+	type Sslcertkey struct {
+		Certkey string `json:&quot;certkey&quot;`
+		Cert string `json:&quot;cert&quot;`
+		Key string `json:&quot;key&quot;`
+	}
+	type PostData struct {
+		Sslcertkey Sslcertkey `json:&quot;sslcertkey&quot;`
+	}
+
+	data := PostData{
+		Sslcertkey{
+			Certkey: &quot;rs&quot;,
+			Cert: &quot;/nsconfig/ssl/rs.crt&quot;,
+			Key: &quot;/nsconfig/ssl/rs.key&quot;,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-6">Step Six: Add Servers</h3>
+
+<p>The next step is to make the NetScaler CPX aware of the back-end servers.  To do so we will create a post request to <code>/nitro/v1/config/server</code>.</p>
+
+<p>In the example below we will make CPX aware of a single back-end server, but you can add more if you need to:</p>
+
+<ul>
+<li>rserver.com
+
+<ul>
+<li>10.21.0.95</li>
+</ul></li>
+</ul>
+
+<pre><code class="language-go">func addServers(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/server&quot;
+
+	type Server struct {
+		Name string `json:&quot;name&quot;`
+		Ipaddress string `json:&quot;ipaddress&quot;`
+		Comment string `json:&quot;comment&quot;`
+	}
+	type PostData struct {
+		Server []Server `json:&quot;server&quot;`
+	}
+
+	data := PostData{
+		[]Server{
+			Server{
+				Name: &quot;rserver.com&quot;,
+				Ipaddress: &quot;10.21.0.95&quot;,
+				Comment: &quot;R Web Server&quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-7">Step Seven: Add Services</h3>
+
+<p>The next step is to make the NetScaler CPX aware of the back-end servers services.  A service is an application or port open on the server.  To do so we will create a post request to <code>/nitro/v1/config/service</code>.</p>
+
+<p>In the example below we will make CPX aware of a single service:</p>
+
+<ul>
+<li>rserver.com
+
+<ul>
+<li>http/80</li>
+</ul></li>
+</ul>
+
+<pre><code class="language-go">func addServices(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/service&quot;
+
+	type Service struct {
+		Name string `json:&quot;name&quot;`
+		Servername string `json:&quot;servername&quot;`
+		Servicetype string `json:&quot;servicetype&quot;`
+		Port int `json:&quot;port&quot;`
+	}
+	type PostData struct {
+		Service []Service `json:&quot;service&quot;`
+	}
+
+	data := PostData{
+		[]Service{
+			Service{
+				Name: &quot;http-rserver.com&quot;,
+				Servername: &quot;rserver.com&quot;,
+				Servicetype: &quot;http&quot;,
+				Port: 80,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-8">Step Eight: Add a Load Balancing Virtual Server</h3>
+
+<p>We will next create a load balancing virtual server on the NetScaler.  This service will handle HTTPS connections and we will mark the type and port as <code>ssl</code> and <code>443</code> respectively.</p>
+
+<p>To do so we will create the post call to <code>/nitro/v1/config/lbvserver</code> with the data of virtual server.</p>
+
+<pre><code class="language-go">func addLBVservers(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/lbvserver&quot;
+
+	type Lbvserver struct {
+		Name string `json:&quot;name&quot;`
+		Servicetype string `json:&quot;servicetype&quot;`
+		Ipv46 string `json:&quot;ipv46&quot;`
+		Port int `json:&quot;port&quot;`
+	}
+	type PostData struct {
+		Lbvserver []Lbvserver `json:&quot;lbvserver&quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver{
+			Lbvserver{
+				Name: &quot;lbvs-ssl-rserver.com&quot;,
+				Servicetype: &quot;ssl&quot;,
+				Ipv46: &quot;192.168.20.15&quot;,
+				Port: 443,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-9">Step Nine: Bind Service to Virtual Server</h3>
+
+<p>The next step is to bind the services to the load balancing virtual server we just created.  Binding the services allows the NetScaler to load balance servers behind a single entry point.</p>
+
+<p>We will create our post request to <code>/nitro/v1/config/lbvserver_service_binding</code>.  The post data binds load balancing virtual names and service names.</p>
+
+<pre><code class="language-go">func bindLBVserversToServices(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/lbvserver_service_binding&quot;
+
+	type Lbvserver_service_binding struct {
+		Name string `json:&quot;name&quot;`
+		Servicename string `json:&quot;servicename&quot;`
+	}
+	type PostData struct {
+		Lbvserver_service_binding []Lbvserver_service_binding `json:&quot;lbvserver_service_binding&quot;`
+	}
+
+	data := PostData{
+		[]Lbvserver_service_binding{
+			Lbvserver_service_binding{
+				Name: &quot;lbvs-ssl-rserver.com&quot;,
+				Servicename: &quot;http-rserver.com&quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-10">Step Ten: Bind SSL Certificate to Virtual Server</h3>
+
+<p>The next step is to bind the SSL Certificate and Key to the load balancing virtual server we just created. Binding the certkey allows the NetScaler to process SSL connections.</p>
+
+<p>We will create our post request to <code>/nitro/v1/config/sslvserver_sslcertkey_binding</code>.  The post data binds <code>load balancing virtual name</code> and <code>certkey name</code>.</p>
+
+<pre><code class="language-go">func bindLBVserversToCertKey(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/sslvserver_sslcertkey_binding&quot;
+
+	type Sslvserver_sslcertkey_binding struct {
+		Vservername string `json:&quot;vservername&quot;`
+		Certkeyname string `json:&quot;certkeyname&quot;`
+	}
+	type PostData struct {
+		Sslvserver_sslcertkey_binding []Sslvserver_sslcertkey_binding `json:&quot;sslvserver_sslcertkey_binding&quot;`
+	}
+
+	data := PostData{
+		[]Sslvserver_sslcertkey_binding{
+			Sslvserver_sslcertkey_binding{
+				Vservername: &quot;lbvs-ssl-rserver.com&quot;,
+				Certkeyname: &quot;rs&quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-11">Step Eleven: Save Configuration</h3>
+
+<p>Our configuration is done!  We should have a working SSL Offload Load Balancing Virtual Server now, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.</p>
+
+<p>We save the config by posting our data defined below to <code>/nitro/v1/config/nsconfig?action=save</code>.</p>
+
+<pre><code class="language-go">func saveConfig(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/nsconfig?action=save&quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&quot;nsconfig&quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-12">Step Twelve: Logout</h3>
+
+<p>Lastly we need to logout.  To do so we create our request to <code>/nitro/v1/config/logout</code>.</p>
+
+<pre><code class="language-go">func logout(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/logout&quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&quot;logout&quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-13">Step Thirteen: Main (Run it all)</h3>
+
+<p>Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.</p>
+
+<pre><code class="language-go">func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableFeature(client)
+	uploadCertAndKeyFiles(client)
+	installCrtKey(client)
+	addServers(client)
+	addServices(client)
+	addLBVservers(client)
+	bindLBVserversToServices(client)
+	bindLBVserversToCertKey(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&quot;done&quot;)
+}
+</code></pre>
+
+<h3 id="step-14">Step Fourteen: Test the configuration</h3>
+
+<p>Test the configuration by loading a browser and pointing it to the SSL load balancing virtual server you referenced in your configuration in <a href="index.html#step-8">Step Eight</a>.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>You should now have the ability to create a SSL load balancing virtual server to handle SSL connections and free up resources on your back-end hosts.</p>
+
+<p>You can find the full go source as well as a postman collection of the rest calls referenced in this article here:</p>
+
+<ul>
+<li><a href="../../code/ssloffload.go">Full Source</a></li>
+<li><a href="../../code/ssloffload.postman_collection.json">Postman Collection</a></li>
+</ul>
+
+	
+			
+
+			
+				<div class="tags-list">
+					<span class="dark-red">Tags</span><span class="decorative-marker">//</span>
+					
+	                <a class="post-tag post-tag-ssl" href="../../tags/ssl.html">ssl</a>,
+	                
+	                <a class="post-tag post-tag-lb" href="../../tags/lb.html">lb</a>,
+	                
+	                <a class="post-tag post-tag-go" href="../../tags/go.html">go</a>,
+	                
+				</div>
+			
+
+			
+				<div class="paging">
+					<span class="paging-label">More Reading</span>
+					
+					<div class="paging-newer">
+						<span class="dark-red">Newer</span><span class="decorative-marker">//</span>
+						<a class="paging-link" href="../http-to-https-redirect/index.html">HTTP to HTTPS Redirect</a>
+		            </div>
+		            
+
+					
+					<div class="paging-older">
+						<span class="dark-red">Older</span><span class="decorative-marker">//</span>
+			            <a class="paging-link" href="../../about/index.html">About</a>
+		            </div>
+		            
+	            </div>
+            
+          </section>
+          
+          	
+          
+        
+      <div class="footer">
+	<hr class="thin" />
+	<div class="pure-menu pure-menu-horizontal pure-menu-open">
+		<ul class="footer-menu">
+		
+			<li><a href="../../post.1.html">Back to Posts</a></li>
+		
+		</ul>
+	</div>
+
+	<p>&copy; 2016. All rights reserved.</p>
+</div>
+    </div>
+  </div>
+	
+
+	
+
+  
+</body>
+</html>

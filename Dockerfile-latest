@@ -1,0 +1,11 @@
+FROM kyma/docker-nginx
+MAINTAINER Mayank Tahilramani and Brian Tannous
+RUN apt-get -y update \
+	&& apt-get -y install wget \
+	&& mkdir /var/www \
+	&& rm -rf /var/lib/apt/lists/*
+WORKDIR /var/www
+RUN wget --recursive --no-clobber --page-requisites --html-extension --convert-links --restrict-file-names=windows --random-wait --domains logic.bz --no-parent bt.logic.bz \
+	&& cp -R /var/www/bt.logic.bz/* /var/www/ \
+	&& rm -R /var/www/bt.logic.bz
+CMD 'nginx'

@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en-us">
+<head>
+  <title>
+    CPX as a DNS Server // NetScaler NITRO Blogs
+  </title>
+
+  <link href="http://gmpg.org/xfn/11" rel="profile">
+<meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+<meta name="description" content="">
+<meta name="keywords" content="">
+<meta name="author" content="Brian Tannous">
+<meta name="generator" content="Hugo 0.17" />
+
+  <meta property="og:title" content="CPX as a DNS Server" />
+<meta property="og:description" content="" />
+<meta property="og:type" content="website" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="http://bt.logic.bz/post/cpx-as-a-dns-server/" />
+
+
+  
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/base-min.css">
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/pure-min.css">
+  
+  
+    <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/pure/0.5.0/grids-responsive-min.css">
+  
+  
+
+  <link rel="stylesheet" href="../../css/redlounge.css">
+  <link href="http://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css" rel="stylesheet">
+  <link href='http://fonts.googleapis.com/css?family=Raleway:400,200,100,700,300,500,600,800' rel='stylesheet' type='text/css'>
+  <link href='http://fonts.googleapis.com/css?family=Libre+Baskerville:400,700,400italic' rel='stylesheet' type='text/css'>
+
+  
+  <link rel="apple-touch-icon-precomposed" sizes="144x144" href="../../touch-icon-144-precomposed.png">
+  <link rel="shortcut icon" href="../../favicon.png">
+
+  
+  <link href="index.html" rel="alternate" type="application/rss+xml" title="NetScaler NITRO Blogs" />
+
+    
+  
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/styles/github.min.css">
+  
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/highlight.min.js"></script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.7.0/languages/go.min.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+
+
+  
+
+  
+
+  
+
+  
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', "UA-85053807-1", 'auto');
+  ga('send', 'pageview');
+</script>
+
+</head>
+
+<body>
+	
+
+	<div id="layout" class="pure-g">
+    <div class="sidebar pure-u-1 pure-u-md-1-4">
+  <div class="header">
+    
+
+	
+
+    <h1 class="brand-title">NetScaler NITRO Blogs</h1>
+    <h2 class="brand-tagline">A few quick examples utilizing NetScaler CPX and GoLang</h2>
+
+    <nav class="nav">
+      <ul class="nav-list">
+        <li class="nav-item"><span class="nav-item-separator">//</span><a href="../../index.html">Home</a></li>
+        
+      </ul>
+    </nav>
+
+    
+
+  </div>
+</div>
+
+	
+	
+
+    <div class="content pure-u-1 pure-u-md-3-4">
+		<a name="top"></a>
+		
+
+		
+			
+		    <div id="toc" class="pure-u-1 pure-u-md-1-4">
+				<small class="toc-label">Contents</small>
+		   	 	<nav id="TableOfContents">
+<ul>
+<li>
+<ul>
+<li><a href="index.html#introduction">Introduction</a></li>
+<li><a href="index.html#prerequisites">Prerequisites</a></li>
+<li><a href="index.html#example-configuration">Example Configuration</a>
+<ul>
+<li><a href="index.html#step-1">Step One: Imports, Variables, and Helper Functions</a></li>
+<li><a href="index.html#step-2">Step Two: Login</a></li>
+<li><a href="index.html#step-3">Step Three: Enabling DNS Recursion</a></li>
+<li><a href="index.html#step-4">Step Four: Add an ADNS Server</a></li>
+<li><a href="index.html#step-5">Step Five: Add DNS A (Host) Records</a></li>
+<li><a href="index.html#step-6">Step Six: Save Configuration</a></li>
+<li><a href="index.html#step-7">Step Seven: Logout</a></li>
+<li><a href="index.html#step-8">Step Eight: Main (Run it all)</a></li>
+<li><a href="index.html#step-9">Step Nine: Test the configuration</a></li>
+</ul></li>
+<li><a href="index.html#conclusion">Conclusion</a></li>
+</ul></li>
+</ul>
+</nav>
+		    </div>
+		    
+	    
+  		<section class="post">
+            <h1 class="post-title">
+              <a href="index.html">CPX as a DNS Server</a>
+            </h1>
+            <h3 class="post-subtitle">
+            	
+            </h3>
+            
+            	<span class="post-date">
+                	<span class="post-date-day"><sup>28</sup></span><span class="post-date-separator">/</span><span class="post-date-month">Sep</span> <span class="post-date-year">2016</span>
+            	</span>
+            	
+            
+            	
+            		<span class="post-author-single">By <a class="post-author"  target="">Brian Tannous</a></span>
+            		
+
+
+
+
+            	
+            
+
+			
+			
+
+			
+
+			
+
+            
+
+<h2 id="introduction">Introduction</h2>
+
+<p>In today&rsquo;s environments, <strong>DNS</strong> is extremely important.  The NetScaler CPX can be used provide DNS Services to hosts within your infrastructure allowing you to not have to use additional resources to spin up a separate DNS server.  In this guide I will show how to configure the NetScaler CPX to become a DNS server via it&rsquo;s REST API called NITRO using Go.</p>
+
+<blockquote>
+<p><em>While this guide is written for NetScaler CPX, the processes should be able to be applied to other NetScaler platforms (VPX, MPX, and SDX)</em></p>
+
+<p><em>This guide also is written in Go but you can grab the postman collection below to import the raw rest requests into your own <a href="https://www.getpostman.com/">postman client</a>.</em></p>
+</blockquote>
+
+<h2 id="prerequisites">Prerequisites</h2>
+
+<p>This guide assumes that you have a NetScaler CPX deployed within a docker environment.</p>
+
+<p>The following page shows where to download NetScaler CPX and deploy within your environment as well as our NITRO REST API documentation:</p>
+
+<ul>
+<li><a href="https://www.microloadbalancer.com">https://www.microloadbalancer.com</a></li>
+<li><a href="https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html">https://docs.citrix.com/en-us/netscaler-cpx/11-1/install-netscaler-cpx.html</a></li>
+<li><a href="https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html">https://docs.citrix.com/en-us/netscaler/11-1/nitro-api/nitro-rest/api-reference.html</a></li>
+<li><a href="https://layer7.wordpress.com/">https://layer7.wordpress.com/</a></li>
+</ul>
+
+<p>When these requirements are fulfilled you can continue with this guide.</p>
+
+<h2 id="example-configuration">Example Configuration</h2>
+
+<p>For demonstration purposes we are going to set up DNS Services on the NetScaler CPX and add two A (Host) records <strong>r.cluster.local</strong> and <strong>g.cluser.local</strong>.</p>
+
+<h3 id="step-1">Step One: Imports, Variables, and Helper Functions</h3>
+
+<p>The initial step is to configure the imports that we will utilize throughout the script.  We will be utilizing <code>net/http</code> for each request with a few other imports to handle formatting and parsing.  The <code>net/http/cookiejar</code> is important as when logging in the NetScaler responds with a authentication token cookie.  This cookie will automatically be saved within the cookiejar and reused for subsequent requests.</p>
+
+<pre><code class="language-go">package main
+
+import (
+	&quot;net/http&quot;
+	&quot;io/ioutil&quot;
+	&quot;bytes&quot;
+	&quot;net/http/cookiejar&quot;
+	&quot;fmt&quot;
+	&quot;encoding/json&quot;
+)
+</code></pre>
+
+<p>Here we define our constant variables like the CPX IP Address and Port, as well as User name and Password.  Be sure to edit these to fit your deployment.</p>
+
+<blockquote>
+<p><em>The debug boolean allows Go to output simple debugging to stdout throughout the script.</em></p>
+</blockquote>
+
+<pre><code class="language-go">const cpxip string = &quot;192.168.6.5&quot;
+const cpxport string = &quot;80&quot;
+const cpxusername string = &quot;nsroot&quot;
+const cpxpassword string = &quot;nsroot&quot;
+const debug bool = true
+</code></pre>
+
+<p>Next, we will define a helper function <code>postReq</code> that will accept our HTTP client, a URL, and our post data.  This function will make the POST to NetScaler and output debugging if enabled.  This function is utilized within all other functions to post configuration through the NITRO API.</p>
+
+<pre><code class="language-go">func postReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&quot;POST&quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&quot;content-type&quot;, &quot;application/json&quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+</code></pre>
+
+<p>In last stage of Step One, we will define a helper function <code>putReq</code> that will accept our HTTP client, a URL, and our put data.  This function will make the HTTP PUT Request to NetScaler and output debugging if enabled.</p>
+
+<pre><code class="language-go">func putReq(client http.Client, url string, data string) {
+	req, _ := http.NewRequest(&quot;PUT&quot;, url, bytes.NewBuffer([]byte(data)))
+	req.Header.Add(&quot;content-type&quot;, &quot;application/json&quot;)
+
+	res, _ := client.Do(req)
+	defer res.Body.Close()
+
+	if debug {
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(url, string(body))
+	}
+}
+</code></pre>
+
+<h3 id="step-2">Step Two: Login</h3>
+
+<p>Now that we have our initialization steps complete from <a href="index.html#step-1">Step One</a>, we are able to login.  Here we define the login function which points to <code>/nitro/v1/config/login</code>.  We also define our post data, including the <code>username</code>, <code>password</code>, and <code>timeout</code> fields.  We send this post to the <code>postReq</code> helper function.</p>
+
+<blockquote>
+<p><em>It is important to note that as long as the user name and password are correct NetScaler will respond with a cookie that includes our session token.  This cookie is being handled in our script via the cookiejar automatically and will be sent with subsequent requests, but if you wrote your own script in a different language you would need to handle that appropriately.</em></p>
+</blockquote>
+
+<pre><code class="language-go">func login(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/login&quot;
+	
+	type Login struct {
+		Username string `json:&quot;username&quot;`
+		Password string `json:&quot;password&quot;`
+		Timeout int `json:&quot;timeout&quot;`
+	}
+	type PostData struct {
+		Login Login `json:&quot;login&quot;`
+	}
+
+	data := PostData{
+		Login{
+			Username: cpxusername,
+			Password: cpxpassword,
+			Timeout: 300,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-3">Step Three: Enabling DNS Recursion</h3>
+
+<p>Now that we are authenticated from <a href="index.html#step-2">Step Two</a> we can begin the configuration.  We first need to enable the NetScaler Functionality that will allow NetScaler to ask external DNS services our query if NetScaler does not own that record, or <strong>DNS Recursion</strong>.</p>
+
+<p>To do so we will create a HTTP Put request to <code>/nitro/v1/config/dnsparameter</code>.  This request will have our parameter set in the PutData.  We will then pass the info to <code>putReq</code> to handle our request.</p>
+
+<pre><code class="language-go">func enableDNSRecursion(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/dnsparameter&quot;
+
+	type Dnsparameter struct {
+		Recursion string `json:&quot;recursion&quot;`
+	}
+	type PostData struct {
+		Dnsparameter Dnsparameter `json:&quot;dnsparameter&quot;`
+	}
+
+	data := PostData{
+		Dnsparameter{
+			Recursion: &quot;ENABLED&quot;,
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	fmt.Println(string(out))
+	putReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-4">Step Four: Add an ADNS Server</h3>
+
+<p>The next step is to make the NetScaler CPX an Authoritative DNS, <strong>ADNS</strong>, Server.  This allows NetScaler to respond to DNS queries.  To do so we will create a post request to <code>/nitro/v1/config/dnsnameserver</code>.</p>
+
+<p>In this HTTP Put request we include the local IP address NetScaler will serve DNS as well as setting the type to UDP.  The Local value designates NetScaler as the owner of this service and it is set to <code>true</code>.</p>
+
+<pre><code class="language-go">func addADNSServer(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/dnsnameserver&quot;
+
+	type Dnsnameserver struct {
+		Ip string `json:&quot;ip&quot;`
+		Type string `json:&quot;type&quot;`
+		Local bool `json:&quot;local&quot;`
+	}
+	type PostData struct {
+		Dnsnameserver []Dnsnameserver `json:&quot;dnsnameserver&quot;`
+	}
+
+	data := PostData{
+		[]Dnsnameserver{
+			Dnsnameserver{
+				Ip: &quot;192.168.20.20&quot;,
+				Type: &quot;UDP&quot;,
+				Local: true,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-5">Step Five: Add DNS A (Host) Records</h3>
+
+<p>Next, we will add two DNS A records.  To add the records we will add the <strong>host-name</strong> and the <strong>IP address</strong> for each service in the PostData below. We will send the request to <code>/nitro/v1/config/dnsaddrec</code>.</p>
+
+<pre><code class="language-go">func addARecords(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/dnsaddrec&quot;
+
+	type Dnsaddrec struct {
+		Hostname string `json:&quot;hostname&quot;`
+		Ipaddress string `json:&quot;ipaddress&quot;`
+	}
+	type PostData struct {
+		Dnsaddrec []Dnsaddrec `json:&quot;dnsaddrec&quot;`
+	}
+
+	data := PostData{
+		[]Dnsaddrec{
+			Dnsaddrec{
+				Hostname: &quot;r.cluster.local&quot;,
+				Ipaddress: &quot;10.10.10.10&quot;,
+				},
+			Dnsaddrec{
+				Hostname: &quot;g.cluster.local&quot;,
+				Ipaddress: &quot;10.10.10.11&quot;,
+				},
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-6">Step Six: Save Configuration</h3>
+
+<p>Our configuration is done!  We should have a working DNS Server running on NetScaler, but we need to do two steps before testing.  First we need to save the configuration.  NetScaler has a concept of running config and saved config.  The running config is stored in memory and if the appliance reboots that configuration will be lost unless the configuration was saved.</p>
+
+<p>We save the config by posting our data defined below to <code>/nitro/v1/config/nsconfig?action=save</code>.</p>
+
+<pre><code class="language-go">func saveConfig(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/nsconfig?action=save&quot;
+	
+	type Nsconfig struct {
+	}
+	type PostData struct {
+		Nsconfig Nsconfig `json:&quot;nsconfig&quot;`
+	}
+
+	data := PostData{
+		Nsconfig{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-7">Step Seven: Logout</h3>
+
+<p>Lastly we need to logout.  To do so we create our request to <code>/nitro/v1/config/logout</code>.</p>
+
+<pre><code class="language-go">func logout(client http.Client) {
+	url := &quot;http://&quot; + cpxip + &quot;:&quot; + cpxport + &quot;/nitro/v1/config/logout&quot;
+	
+	type Logout struct {
+	}
+	type PostData struct {
+		Logout Logout `json:&quot;logout&quot;`
+	}
+
+	data := PostData{
+		Logout{
+		},
+	}
+	out, _ := json.Marshal(data)
+
+	postReq(client, url, string(out))
+}
+</code></pre>
+
+<h3 id="step-8">Step Eight: Main (Run it all)</h3>
+
+<p>Our main function creates our HTTP client, enabling the cookiejar, and runs each function above.</p>
+
+<pre><code class="language-go">func main() {
+	cookieJar, _ := cookiejar.New(nil)
+	client := http.Client{
+	    Jar: cookieJar,
+	}
+
+	login(client)
+	enableDNSRecursion(client)
+	addADNSServer(client)
+	addARecords(client)
+	saveConfig(client)
+	logout(client)
+
+	fmt.Println(&quot;done&quot;)
+}
+</code></pre>
+
+<h3 id="step-9">Step Nine: Test the configuration</h3>
+
+<p>Test the configuration by loading a browser and pointing it to the domain names you referenced in your configuration.  You will need to configure your local machine&rsquo;s DNS server to point to the NetScaler&rsquo;s ADNS IP Address you added in <a href="index.html#step-4">Step Four</a>.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>You should now have the ability to create an ADNS Server on NetScaler to serve DNS to clients in your environment.</p>
+
+<p>You can find the full go source as well as a postman collection of the rest calls referenced in this article here:</p>
+
+<ul>
+<li><a href="../../code/dnsserver.go">Full Source</a></li>
+<li><a href="../../code/dnsserver.postman_collection.json">Postman Collection</a></li>
+</ul>
+
+	
+			
+
+			
+				<div class="tags-list">
+					<span class="dark-red">Tags</span><span class="decorative-marker">//</span>
+					
+	                <a class="post-tag post-tag-cpx" href="../../tags/cpx.html">cpx</a>,
+	                
+	                <a class="post-tag post-tag-dns" href="../../tags/dns.html">dns</a>,
+	                
+	                <a class="post-tag post-tag-go" href="../../tags/go.html">go</a>,
+	                
+				</div>
+			
+
+			
+				<div class="paging">
+					<span class="paging-label">More Reading</span>
+					
+					<div class="paging-newer">
+						<span class="dark-red">Newer</span><span class="decorative-marker">//</span>
+						<a class="paging-link" href="../content-switching-on-cpx/index.html">How to Set Up Multiple Domains on NetScaler CPX (Content Switching)</a>
+		            </div>
+		            
+
+					
+					<div class="paging-older">
+						<span class="dark-red">Older</span><span class="decorative-marker">//</span>
+			            <a class="paging-link" href="../autoscale-dns-based-service-groups/index.html">Autoscale DNS Based Service Groups</a>
+		            </div>
+		            
+	            </div>
+            
+          </section>
+          
+          	
+          
+        
+      <div class="footer">
+	<hr class="thin" />
+	<div class="pure-menu pure-menu-horizontal pure-menu-open">
+		<ul class="footer-menu">
+		
+			<li><a href="../../post.1.html">Back to Posts</a></li>
+		
+		</ul>
+	</div>
+
+	<p>&copy; 2016. All rights reserved.</p>
+</div>
+    </div>
+  </div>
+	
+
+	
+
+  
+</body>
+</html>
